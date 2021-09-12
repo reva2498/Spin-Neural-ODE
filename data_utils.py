@@ -5,30 +5,30 @@ import argparse
 
 import torch
 import torch.nn as nn
-#import torch.tensor as Tensor
 import torch.optim as optim
 from torchdiffeq import odeint_adjoint as odeint
 #from torchdiffeq import odeint as odeint
 import torch.nn.functional as F
+#import torchaudio
 from torchcubicspline import(natural_cubic_spline_coeffs, 
                              NaturalCubicSpline)
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.ticker as mtick
 from scipy import interpolate
-from scipy import linalg
+import os.path
 from scipy.stats import norm, cauchy,laplace,logistic, gennorm
 from scipy.optimize import curve_fit
-import scipy.io as sio
-#import os.path
 #import itertools
-#import pandas as pd
+#from scipy import linalg
 #from scipy.signal import savgol_filter
+#import pandas as pd
 #import pywt
+#import scipy.io as sio
 #import sys
 
 
-def get_data_Mumax_pos(path, data_length: int, disgard, steps, disk_radius, Default_dtype = torch.float64):
+def get_data_Mumax_pos(path, data_length: int, disgard, steps, disk_radius, Default_dtype):
     
     readin = (np.genfromtxt(path)[:,:])
     readin = ((readin-disk_radius)/10/1)[disgard:]
@@ -45,11 +45,11 @@ def get_data_Mumax_pos(path, data_length: int, disgard, steps, disk_radius, Defa
     
     return true_y0, true_y
 
-def get_data_Mumax_mz(path, data_length: int, discard, steps, sigma, ds, Default_dtype = torch.float64, fix_0 = False):
+def get_data_Mumax_mz(path, data_length: int, discard, steps, sigma, ds, Default_dtype, fix_0 = False):
     
     
     readin = (np.genfromtxt(path)[::ds,3:4])
-    if fix_0: # remove the bias of the inital state
+    if fix_0:# remove the bias of the inital state
         bias0 = (np.genfromtxt('../../Mumax3_simulations/1skyrmion_input_PMA_DMI_train/table.txt')[::ds,3])[0]
     else:
         bias0 = readin[0]
@@ -72,7 +72,7 @@ def get_data_Mumax_mz(path, data_length: int, discard, steps, sigma, ds, Default
     
     return true_y0, true_y
 
-def get_data_Mumax_mz_DMI(t, path, data_length, discard, steps, ds, Default_dtype = torch.float64):
+def get_data_Mumax_mz_DMI(t, path, data_length, discard, steps, ds, Default_dtype):
     
     bias0 = (np.genfromtxt('/home/xing/Mumax/Model_1skyr/sin600p_Kuamp[-0505]_Damp[-0404]_sp50_f4.out/table.txt')[::ds,3])
     mz = ((np.genfromtxt(path)[::ds,3]))
@@ -95,7 +95,7 @@ def get_data_Mumax_mz_DMI(t, path, data_length, discard, steps, ds, Default_dtyp
     
     return true_y0, true_y, tck_mz, mz
 
-def get_data_mat(path, data_length, discard, steps, ds, sp, itr, Default_dtype = torch.float64):
+def get_data_mat(path, data_length, discard, steps, ds, sp, itr, Default_dtype):
     DATA = sio.loadmat(path)
     spokenDB_2D = DATA['spokenDB_2D']*10
     data = []
@@ -117,7 +117,7 @@ def get_data_mat(path, data_length, discard, steps, ds, sp, itr, Default_dtype =
     return true_y0, true_y
 
 
-def get_data_txt(path, data_length: int, discard, steps, ds, Default_dtype = torch.float64, start = 0, stop = 1):
+def get_data_txt(path, data_length: int, discard, steps, ds, Default_dtype, start = 0, stop = 1):
     #-----------for signal from oscillator, start = 2, stop = 3
     data = (np.genfromtxt(path))[::ds]
     #print(data.shape)
@@ -137,7 +137,7 @@ def get_data_txt(path, data_length: int, discard, steps, ds, Default_dtype = tor
     
     return true_y0, true_y
 
-def get_add_txt(path, data_size: int, discard, ds, device, Default_dtype = torch.float64, start = 1, stop = 2, dt = (25/2)/1000):
+def get_add_txt(path, data_size: int, discard, ds, device, Default_dtype, start = 1, stop = 2, dt = (25/2)/1000):
     #-----------for signal from oscillator, start = 1, stop = 2
     data = (np.genfromtxt(path))[::ds]
     input_data = data[discard:discard+data_size,start:stop]*10
@@ -164,7 +164,7 @@ def get_add_txt(path, data_size: int, discard, ds, device, Default_dtype = torch
     
     return t, ext, tck
 
-def get_add_mat(path, data_size, discard, ds, sp, itr, device, Default_dtype = torch.float64, dt = (25/2)/1000):
+def get_add_mat(path, data_size, discard, ds, sp, itr, Default_dtype, dt = (25/2)/1000):
     DATA = sio.loadmat(path)
     spokenDB_2D = DATA['spokenDB_2D_in']
     data = []
@@ -196,7 +196,7 @@ def get_add_mat(path, data_size, discard, ds, sp, itr, device, Default_dtype = t
     return t[:-10], ext[:-10], tck
 
 
-def get_add_sin_input(data_size: int, disgard, sample_p, Default_dtype = torch.float64, dt = 0.0125):
+def get_add_sin_input(data_size: int, disgard, sample_p, Default_dtype, dt = 0.0125):
     
     np.random.seed(6)
     t = torch.arange(0., (data_size)*dt, dt)
@@ -230,82 +230,3 @@ def get_processed_mg(Neural_number, scale = 1, mg_size = 10000):
     sequence = np.append(sequence,0)
     
     return sequence
-
-def add_noise_to_states(spoken_node_2D, var, seed_num):
-    speaker = [1,2,5,6,7]
-    sp_indx = np.arange(0,5)
-    uttrs_idx = np.arange(0,10)
-    dig_idx = np.arange(0,10)
-    np.random.seed(seed_num)
-    spoken_node_2D_noise = np.empty((5,10,10), dtype=object)
-    for sp in sp_indx:
-        for uttr in uttrs_idx:
-            for di in dig_idx:
-                mat = spoken_node_2D[sp,uttr,di]
-                ntr = np.random.normal(0.0, var, mat.shape)
-                #ntr = truncated_cauchy_rvs(loc=0, scale=var, a=-0.2, b=0.2, size=mat.shape)
-                #ntr =   np.clip(cauchy.rvs(loc=0.0, scale=var, size=mat.shape), -clip, clip) 
-                #ntr = gennorm.rvs(beta = beta, scale=var,size=mat.shape)
-                spoken_node_2D_noise[sp,uttr,di] =  mat + ntr
-                
-    return spoken_node_2D_noise
-
-
-def test_all_speakers(ode_func, spokenDB_2D_in, spokenDB_2D, dt, dim, Default_dtype = torch.float64):
-    
-
-    speaker = [1,2,5,6,7]
-    sp_indx = np.arange(0,5)
-    uttrs_idx = np.arange(0,10)
-    dig_idx = np.arange(0,10)
-
-    spoken_node_2D = np.empty((5,10,10), dtype=object)
-    spoken_node_time = np.empty((5,10,10), dtype=object)
-    spoken_node_loss = np.empty((5,10,10), dtype=object)
-
-
-    for sp in sp_indx:
-        for uttr in uttrs_idx:
-            for di in dig_idx:
-                readin = np.append(spokenDB_2D[sp,uttr,di].flatten('F'), np.zeros(dim-1))
-                readin = np.expand_dims(readin, axis=1)
-                lg = len(readin)
-
-                data = readin[:lg-(dim-1)]
-                for i in range(1,dim):
-                    temp = readin[i:lg-(dim-1-i)]
-                    data = np.concatenate((data, temp), axis = -1)
-                
-                true_y = torch.tensor(data, dtype=Default_dtype)
-                true_y = torch.unsqueeze(true_y, 1)
-                true_y0 = torch.tensor(np.array(true_y[0]), dtype=Default_dtype)
-            
-                input_data = np.append(spokenDB_2D_in[sp,uttr,di].flatten('F'),np.zeros(dim))
-                #t = torch.arange(0, len(input_data)*dt, dt)
-                t = torch.linspace(0, len(input_data)*dt-dt, len(input_data))
-                tck = interpolate.interp1d(t.numpy(),input_data, kind='linear')
-                t = t[:lg-(dim-1)]
-
-                ext = torch.tensor(input_data[:lg-(dim-1)].reshape((-1,1)), dtype=Default_dtype)
-                ext = torch.unsqueeze(ext, 1) 
-                ext_time = torch.unsqueeze(t, 1)
-                ext_time = torch.unsqueeze(ext_time, 1)
-                ext = torch.cat((ext, ext_time), dim = -1)
-
-                ode_func.sequence = tck
-            
-                with torch.no_grad():
-                    c0 = time.perf_counter()
-                    pred_y = odeint(ode_func, torch.cat((true_y0, ext[0,:,1:]), dim = -1), t, method = 'rk4' )
-                    loss = F.mse_loss(pred_y[:,:,0:1],true_y[:,:,0:1])
-                    print('Test set: MSE(exp-Node) = {:.6f}'.format(loss.item()))
-                    c1 = time.perf_counter()
-                    print(str(c1-c0)+ "seconds.")
-                    #spoken_ode_2D.append(pred_y[:,0,0].numpy().reshape((400,-1), order = 'F'))
-                    #spoken_ode_time.append(c1-c0)
-                    spoken_node_2D[sp,uttr,di] = pred_y[:,0,0].numpy().reshape((400,-1), order = 'F')
-                    spoken_node_time[sp,uttr,di] = c1-c0
-                    spoken_node_loss[sp,uttr,di] = loss.item()
-    
-    
-    return spoken_node_2D, spoken_node_time, spoken_node_loss
